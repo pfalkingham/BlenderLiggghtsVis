@@ -1,18 +1,46 @@
-# BlenderLiggghtsVis v0.8.2
-Repository for Blender addon to visualize liggghts output
+# LIGGGHTS Particle Visualization
 
+A Blender addon for importing and visualizing LIGGGHTS particle simulation data.
 
-This is fantastically bare-bones at the minute, but has enough functionality that I want to get a snapshot of this up on github.
+## Features
 
-## Blender LIGGGHTS Reader
+- Import LIGGGHTS dump files as particles in Blender
+- Automatic frame sequence detection
+- Reference frame support for displacement visualization
+- Dynamic updates when changing frames
+- Geometry Nodes visualization
 
-This addon can import particle data as output from LIGGGHTS (and maybe LAMMPS but I haven't tried yet).  Currently, it will only accept ascii data, not binary, though I am working on that.
+## Installation
 
- - zip it and add as an addon in blender manually (v1 might go to the extensions market place but probably not, as it's pretty niche)
- - this provides a new tab on the right of the 3D viewport called 'LIGGGHTS'
- - click the button and select a file.  It _should_ figure out the sequence of files in the directory, but parsing filenames is not bullet proof.
- - You can then scrub the timeline (slow*) and it will change files.
- - You can set a reference frame, which will take XYZ positions from that frame and add them as attributes to other frames for visuzalization of displacement etc.
- - Shading of variables is handled via geometry nodes and shader nodes.
+1. Download the addon ZIP file
+2. In Blender, go to Edit > Preferences > Add-ons
+3. Click "Install..." and select the ZIP file
+4. Enable the addon by checking the box
 
-# Very much a work in progress.
+## Usage
+
+1. In the 3D Viewport, open the sidebar (N key)
+2. Select the "LIGGGHTS" tab
+3. Click "Import Particle Data" and select any frame file from your simulation
+4. Use Blender's timeline to navigate through frames
+5. Optionally set a reference frame to visualize particle displacement
+
+## File Format
+
+The addon expects LIGGGHTS dump files with at least the following columns:
+- id
+- x, y, z (particle positions)
+- radius
+
+## Version History
+
+- 0.7.0: Improved error handling and performance optimizations
+- 0.6.8: Initial public release
+
+## License
+
+[Your license information here]
+
+## Contact
+
+[Your contact information here]
