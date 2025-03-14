@@ -45,8 +45,8 @@ The addon expects LIGGGHTS dump files with at least the following columns:
 	-- unknown attributes
 - read binary files
 - make sure reference is applied to current frame when you click set reference
-- cache files.  maybe dynamically keep track of RAM?  maybe enter size of cache first? dunno.  It's _very_ slow at the moment.
-  -- a button to flush cache would be useful to do before rendering maybe.
+~~- cache files.  maybe dynamically keep track of RAM?  maybe enter size of cache first? dunno.  It's _very_ slow at the moment.~~
+  ~~-- a button to flush cache would be useful to do before rendering maybe.~~
 
 ## Contact
 
