@@ -34,6 +34,7 @@ The addon expects LIGGGHTS dump files with at least the following columns:
 
 ## Version History
 
+- 0.8.3b: Has a cachine system, and is overall just much faster.
 - 0.8.2: Can read fx/fy/fz and other attributes (untested)
 - 0.7.0: Improved error handling and performance optimizations
 - 0.6.8: Initial public release
