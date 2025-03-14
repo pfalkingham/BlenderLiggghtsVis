@@ -1,7 +1,7 @@
 bl_info = {
     "name": "LIGGGHTS Particle Visualization",
     "author": "Your Name",
-    "version": (0, 8, 2),  # Updated version with performance improvements
+    "version": (0, 8, 3),  # Updated version with memory optimizations
     "blender": (4, 3, 0),
     "location": "View3D > Sidebar > LIGGGHTS",
     "description": "Import and visualize LIGGGHTS particle simulation data",
@@ -17,6 +17,7 @@ classes = (
     particle_dataset.ReferencePosition,
     particle_dataset.ParticleDataset,
     ui.LIGGGHTS_PT_main_panel,
+    ui.LIGGGHTS_OT_clear_cache,  # Register the new cache clearing operator
     operators.LIGGGHTS_OT_import_particles,
     operators.LIGGGHTS_OT_set_reference,
 )
@@ -31,6 +32,13 @@ def register():
 def unregister():
     # Clean up frame change handlers
     operators.LIGGGHTS_OT_import_particles.cleanup_handler()
+    
+    # Clean up any caches
+    try:
+        from . import numpy_loader
+        numpy_loader.LIGGGHTSDataLoader.clear_cache()
+    except:
+        pass
     
     # Remove properties
     if hasattr(bpy.types.Scene, "is_setting_reference"):

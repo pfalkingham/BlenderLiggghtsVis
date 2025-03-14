@@ -8,6 +8,8 @@ from bpy_extras.object_utils import object_data_add
 from bpy.types import Operator
 from mathutils import Vector, Matrix
 from . import optimized_parser
+import time
+import threading
 
 class LIGGGHTS_OT_import_particles(bpy.types.Operator, ImportHelper):
     bl_idname = "liggghts.import_particles"
@@ -18,6 +20,7 @@ class LIGGGHTS_OT_import_particles(bpy.types.Operator, ImportHelper):
     
     _is_updating = False  # Class variable to track updates
     _current_frame = None  # Track current frame to avoid duplicate updates
+    _bg_thread = None  # Background thread for parallel loading
 
     filepath: StringProperty(subtype='FILE_PATH')
     start_line: IntProperty(name="Start Line", default=0, description="Line number to start reading particle data from")
@@ -70,6 +73,12 @@ class LIGGGHTS_OT_import_particles(bpy.types.Operator, ImportHelper):
             except:
                 pass
         
+        # Get file data for the first frame to set up initial particle system
+        data = dataset.parse_frame_data(self.filepath)
+        if not data or not 'positions' in data or len(data['positions']) == 0:
+            self.report({'ERROR'}, "No particle data found in file")
+            return {'CANCELLED'}
+            
         # Create mesh object
         mesh = bpy.data.meshes.new("ParticleSystem")
         obj = bpy.data.objects.new("Particles", mesh)
@@ -77,72 +86,33 @@ class LIGGGHTS_OT_import_particles(bpy.types.Operator, ImportHelper):
         context.window_manager.particle_object = obj
         
         # Setup geometry nodes
-        self._setup_geometry_nodes(obj)
+        self._setup_geometry_nodes(obj, context)
+        
+        # Apply first frame data
+        verts = []
+        
+        if isinstance(data['positions'], np.ndarray):
+            # Convert NumPy array to list of Vector
+            verts = [Vector(pos) for pos in data['positions']]
+        else:
+            # Already a list of tuples/Vector
+            verts = [Vector(pos) if isinstance(pos, tuple) else pos for pos in data['positions']]
+            
+        # Create the initial mesh
+        mesh.from_pydata(verts, [], [])
+        mesh.update()
+        
+        # Add attributes
+        self._update_attributes_numpy(mesh, data)
         
         # Setup animation handling
         self._setup_animation_handler(context)
         
-        self.report({'INFO'}, f"Imported {len(matching_files)} frames from {basename}")
-        
-        # Use max_particles=None to read all particles if the user sets it to 0
-        max_particles = self.max_particles if self.max_particles > 0 else None
-        
-        data, additional_data = optimized_parser.parse_data(self.filepath, self.start_line, max_particles)
-        
-        if len(data) == 0:
-            self.report({'ERROR'}, "No particle data found or error during parsing.")
-            return {'CANCELLED'}
-        
-        # Create mesh and object
-        mesh = bpy.data.meshes.new("LIGGGHTS_Particles")
-        obj = bpy.data.objects.new("LIGGGHTS_Particles", mesh)
-        
-        # Add object to scene
-        context.collection.objects.link(obj)
-        
-        # Create vertices from data
-        verts = [Vector(row) for row in data]
-        mesh.from_pydata(verts, [], [])
-        
-        # Update mesh geometry
-        mesh.update()
-        
-        # Add additional data as vertex attributes
-        for name, values in additional_data.items():
-            if len(values) == len(verts):
-                # Create a new attribute
-                attribute = mesh.attributes.new(name=name, type='FLOAT_VECTOR', domain='POINT')
-                
-                # Assign the values to the attribute
-                for i, value in enumerate(values):
-                    attribute.data[i].vector = (value, 0.0, 0.0)  # Assuming scalar values
-            else:
-                self.report({'WARNING'}, f"Length of data for column '{name}' does not match the number of vertices. Skipping this column.")
-        
-        # Optionally use a reference object for positioning
-        if self.use_reference_object and self.reference_object:
-            try:
-                reference_obj = bpy.data.objects[self.reference_object]
-                
-                # Apply the inverse transformation of the reference object to the particles
-                matrix_world_inv = reference_obj.matrix_world.inverted()
-                for vert in mesh.vertices:
-                    vert.co = matrix_world_inv @ vert.co
-            
-            except KeyError:
-                self.report({'ERROR'}, f"Reference object '{self.reference_object}' not found.")
-                return {'CANCELLED'}
-        
-        # Link the object to the scene and select it
-        context.view_layer.objects.active = obj
-        obj.select_set(True)
-        
-        # Store the object in the scene's particle_object property
-        context.window_manager.particle_object = obj
+        self.report({'INFO'}, f"Imported {len(matching_files)} frames with {len(verts)} particles")
         
         return {'FINISHED'}
         
-    def _setup_geometry_nodes(self, obj):
+    def _setup_geometry_nodes(self, obj, context):
         # Create new geometry nodes modifier if it doesn't exist
         gn_mod = obj.modifiers.get("ParticleViz")
         if not gn_mod:
@@ -175,7 +145,7 @@ class LIGGGHTS_OT_import_particles(bpy.types.Operator, ImportHelper):
         radius_attr.data_type = 'FLOAT'
         radius_attr.inputs["Name"].default_value = "radius"
         
-        # Link nodes (now with proper input socket)
+        # Link nodes
         links = node_group.links
         links.new(group_in.outputs["Geometry"], points.inputs["Mesh"])
         links.new(radius_attr.outputs[0], points.inputs["Radius"])
@@ -223,78 +193,32 @@ class LIGGGHTS_OT_import_particles(bpy.types.Operator, ImportHelper):
             if not os.path.exists(filepath):
                 return
                 
+            # Handle parallel processing
+            if dataset.use_parallel_processing and not LIGGGHTS_OT_import_particles._bg_thread:
+                # Create a background thread for loading
+                def bg_load():
+                    try:
+                        data = dataset.parse_frame_data(filepath)
+                        if data:
+                            # Need to return to main thread for Blender operations
+                            bpy.app.timers.register(
+                                lambda: LIGGGHTS_OT_import_particles._apply_frame_data(scene, obj, data))
+                    except Exception as e:
+                        print(f"Error in background thread: {str(e)}")
+                    finally:
+                        LIGGGHTS_OT_import_particles._bg_thread = None
+                
+                LIGGGHTS_OT_import_particles._bg_thread = threading.Thread(target=bg_load)
+                LIGGGHTS_OT_import_particles._bg_thread.start()
+                LIGGGHTS_OT_import_particles._is_updating = False
+                return
+                
+            # Standard synchronous processing
             data = dataset.parse_frame_data(filepath)
             if not data:
                 return
-            
-            # Check if data is sorted
-            if not dataset.is_sorted:
-                dataset.is_sorted = dataset.check_if_sorted(data['id'])
-                print(f"Data is sorted: {dataset.is_sorted}")
-            
-            try:
-                # Convert to NumPy arrays if not already
-                if isinstance(data['id'], list):
-                    data['id'] = np.array(data['id'], dtype=np.int32)
-                if isinstance(data['positions'], list):
-                    data['positions'] = np.array(data['positions'], dtype=np.float32)
-                if isinstance(data['radii'], list):
-                    data['radii'] = np.array(data['radii'], dtype=np.float32)
-                    
-                # Sort data by particle ID
-                if not dataset.is_sorted:
-                    sorted_data = LIGGGHTS_OT_import_particles._sort_particle_data_by_id_numpy(data)
-                else:
-                    sorted_data = data
                 
-                # Convert NumPy arrays back to lists for Blender if needed
-                if not isinstance(sorted_data['positions'][0], tuple):
-                    # Convert from Nx3 array to list of tuples for Blender
-                    positions = [tuple(pos) for pos in sorted_data['positions']]
-                else:
-                    positions = sorted_data['positions']
-                    
-            except Exception as e:
-                print(f"Error processing data with NumPy: {str(e)}")
-                # Fall back to original method
-                sorted_data = LIGGGHTS_OT_import_particles._sort_particle_data_by_id(data)
-                positions = sorted_data['positions']
-                
-            # Update mesh
-            mesh = obj.data
-            particle_count = len(sorted_data['id'])
-            current_vertex_count = len(mesh.vertices)
-            
-            # Check if we can update existing vertices or need to recreate
-            recreate_mesh = True
-            if dataset.use_mesh_update and dataset.last_vertex_count == particle_count:
-                recreate_mesh = False
-            
-            if recreate_mesh:
-                # Need to recreate mesh (different particle count)
-                mesh.clear_geometry()
-                mesh.from_pydata(positions, [], [])
-                dataset.last_vertex_count = particle_count
-                print(f"Recreated mesh with {particle_count} vertices")
-            else:
-                # Can update existing vertices (same number of particles)
-                # This is much faster than recreating the mesh
-                try:
-                    mesh.vertices.foreach_set("co", np.array(positions).flatten())
-                    print(f"Updated {particle_count} existing vertices")
-                except Exception as e:
-                    print(f"Error updating vertices: {str(e)}")
-                    # Fall back to recreating mesh
-                    mesh.clear_geometry()
-                    mesh.from_pydata(positions, [], [])
-                    print(f"Fell back to recreating mesh with {particle_count} vertices")
-            
-            # Create or update attributes using NumPy for speed
-            LIGGGHTS_OT_import_particles._update_attributes_numpy(mesh, sorted_data)
-            
-            # Add reference position attributes if needed
-            if scene.liggghts_dataset.reference_frame > 0:
-                LIGGGHTS_OT_import_particles._add_reference_attributes(mesh, sorted_data['id'], scene.liggghts_dataset)
+            LIGGGHTS_OT_import_particles._apply_frame_data(scene, obj, data)
                 
         except Exception as e:
             print(f"Error updating particle data: {str(e)}")
@@ -302,6 +226,94 @@ class LIGGGHTS_OT_import_particles(bpy.types.Operator, ImportHelper):
             traceback.print_exc()
         finally:
             LIGGGHTS_OT_import_particles._is_updating = False
+    
+    @staticmethod
+    def _apply_frame_data(scene, obj, data):
+        """Process and apply particle data to the mesh object"""
+        start_time = time.time()
+        dataset = scene.liggghts_dataset
+        
+        # Debug info
+        print(f"Applying frame data, data keys: {list(data.keys())}")
+        print(f"Positions type: {type(data['positions'])} with shape: {data['positions'].shape if hasattr(data['positions'], 'shape') else len(data['positions'])}")
+        
+        # Check if data is sorted
+        if not dataset.is_sorted:
+            dataset.is_sorted = dataset.check_if_sorted(data['id'])
+            print(f"Data is sorted: {dataset.is_sorted}")
+        
+        try:
+            # Convert to NumPy arrays if not already
+            if isinstance(data['id'], list):
+                data['id'] = np.array(data['id'], dtype=np.int32)
+            if isinstance(data['positions'], list):
+                data['positions'] = np.array(data['positions'], dtype=np.float32)
+            if isinstance(data['radii'], list):
+                data['radii'] = np.array(data['radii'], dtype=np.float32)
+                
+            # Sort data by particle ID
+            if not dataset.is_sorted:
+                sorted_data = LIGGGHTS_OT_import_particles._sort_particle_data_by_id_numpy(data)
+            else:
+                sorted_data = data
+            
+            # Process positions based on their type
+            if isinstance(sorted_data['positions'], np.ndarray):
+                if sorted_data['positions'].ndim == 2:
+                    # Convert from Nx3 array to list of tuples for Blender
+                    positions = [tuple(pos) for pos in sorted_data['positions']]
+                else:
+                    # Unexpected format - convert safely
+                    print(f"Warning: Unexpected position data shape: {sorted_data['positions'].shape}")
+                    positions = [(0,0,0)] * len(sorted_data['id'])
+            else:
+                # Already a list
+                positions = sorted_data['positions']
+                
+        except Exception as e:
+            print(f"Error processing data with NumPy: {str(e)}")
+            # Fall back to original method
+            sorted_data = LIGGGHTS_OT_import_particles._sort_particle_data_by_id(data)
+            positions = sorted_data['positions']
+            
+        # Update mesh
+        mesh = obj.data
+        particle_count = len(sorted_data['id'])
+        current_vertex_count = len(mesh.vertices)
+        
+        # Check if we can update existing vertices or need to recreate
+        recreate_mesh = True
+        if dataset.use_mesh_update and dataset.last_vertex_count == particle_count:
+            recreate_mesh = False
+        
+        if recreate_mesh:
+            # Need to recreate mesh (different particle count)
+            mesh.clear_geometry()
+            mesh.from_pydata(positions, [], [])
+            dataset.last_vertex_count = particle_count
+            print(f"Recreated mesh with {particle_count} vertices")
+        else:
+            # Can update existing vertices (same number of particles)
+            # This is much faster than recreating the mesh
+            try:
+                mesh.vertices.foreach_set("co", np.array(positions).flatten())
+                print(f"Updated {particle_count} existing vertices")
+            except Exception as e:
+                print(f"Error updating vertices: {str(e)}")
+                # Fall back to recreating mesh
+                mesh.clear_geometry()
+                mesh.from_pydata(positions, [], [])
+                print(f"Fell back to recreating mesh with {particle_count} vertices")
+        
+        # Create or update attributes using NumPy for speed
+        LIGGGHTS_OT_import_particles._update_attributes_numpy(mesh, sorted_data)
+        
+        # Add reference position attributes if needed
+        if scene.liggghts_dataset.reference_frame > 0:
+            LIGGGHTS_OT_import_particles._add_reference_attributes(mesh, sorted_data['id'], scene.liggghts_dataset)
+            
+        end_time = time.time()
+        print(f"Frame update completed in {end_time - start_time:.3f}s")
     
     @staticmethod
     def _update_attributes_numpy(mesh, data):
@@ -339,16 +351,49 @@ class LIGGGHTS_OT_import_particles(bpy.types.Operator, ImportHelper):
             # Update radii
             radius_attr.data.foreach_set("value", radii)
             
+            # Add force attributes if available
+            if 'forces' in data:
+                forces = data['forces']
+                
+                # Create or get force attributes
+                fx_attr = mesh.attributes.get("force_x")
+                if not fx_attr:
+                    fx_attr = mesh.attributes.new("force_x", 'FLOAT', 'POINT')
+                fy_attr = mesh.attributes.get("force_y")
+                if not fy_attr:
+                    fy_attr = mesh.attributes.new("force_y", 'FLOAT', 'POINT')
+                fz_attr = mesh.attributes.get("force_z")
+                if not fz_attr:
+                    fz_attr = mesh.attributes.new("force_z", 'FLOAT', 'POINT')
+                    
+                # Update force values
+                if isinstance(forces, np.ndarray) and forces.ndim == 2 and forces.shape[1] >= 3:
+                    fx_attr.data.foreach_set("value", forces[:, 0])
+                    fy_attr.data.foreach_set("value", forces[:, 1])
+                    fz_attr.data.foreach_set("value", forces[:, 2])
+                else:
+                    # Fallback for non-NumPy or unexpected shape
+                    for i, force in enumerate(forces):
+                        if i < len(fx_attr.data):
+                            fx_attr.data[i].value = force[0]
+                            fy_attr.data[i].value = force[1]
+                            fz_attr.data[i].value = force[2]
+            
         except Exception as e:
             print(f"Error updating attributes with NumPy: {str(e)}")
+            import traceback
+            traceback.print_exc()
             # Fall back to standard method
-            for i, id_val in enumerate(data['id']):
-                if i < len(mesh.attributes["particle_id"].data):
-                    mesh.attributes["particle_id"].data[i].value = id_val
-            
-            for i, radius in enumerate(data['radii']):
-                if i < len(mesh.attributes["radius"].data):
-                    mesh.attributes["radius"].data[i].value = radius
+            try:
+                for i, id_val in enumerate(data['id']):
+                    if i < len(mesh.attributes["particle_id"].data):
+                        mesh.attributes["particle_id"].data[i].value = id_val
+                
+                for i, radius in enumerate(data['radii']):
+                    if i < len(mesh.attributes["radius"].data):
+                        mesh.attributes["radius"].data[i].value = radius
+            except Exception as e:
+                print(f"Even fallback attribute update failed: {str(e)}")
     
     @staticmethod
     def _sort_particle_data_by_id_numpy(data):
@@ -367,6 +412,10 @@ class LIGGGHTS_OT_import_particles(bpy.types.Operator, ImportHelper):
                 'positions': data['positions'][sorted_indices],
                 'radii': data['radii'][sorted_indices]
             }
+            
+            # Include forces if present
+            if 'forces' in data:
+                sorted_data['forces'] = data['forces'][sorted_indices]
             
             return sorted_data
             
