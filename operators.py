@@ -193,26 +193,6 @@ class LIGGGHTS_OT_import_particles(bpy.types.Operator, ImportHelper):
             if not os.path.exists(filepath):
                 return
                 
-            # Handle parallel processing
-            if dataset.use_parallel_processing and not LIGGGHTS_OT_import_particles._bg_thread:
-                # Create a background thread for loading
-                def bg_load():
-                    try:
-                        data = dataset.parse_frame_data(filepath)
-                        if data:
-                            # Need to return to main thread for Blender operations
-                            bpy.app.timers.register(
-                                lambda: LIGGGHTS_OT_import_particles._apply_frame_data(scene, obj, data))
-                    except Exception as e:
-                        print(f"Error in background thread: {str(e)}")
-                    finally:
-                        LIGGGHTS_OT_import_particles._bg_thread = None
-                
-                LIGGGHTS_OT_import_particles._bg_thread = threading.Thread(target=bg_load)
-                LIGGGHTS_OT_import_particles._bg_thread.start()
-                LIGGGHTS_OT_import_particles._is_updating = False
-                return
-                
             # Standard synchronous processing
             data = dataset.parse_frame_data(filepath)
             if not data:

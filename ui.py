@@ -65,13 +65,6 @@ class LIGGGHTS_PT_main_panel(bpy.types.Panel):
             # Advanced options box
             adv_box = layout.box()
             adv_box.label(text="Advanced Options")
-            thread_row = adv_box.row()
-            thread_row.prop(dataset, "use_parallel_processing", text="Parallel Processing")
-            # Add note about parallel processing (it's not very useful but provides info to user)
-            if dataset.use_parallel_processing:
-                note_row = adv_box.row()
-                note_row.label(text="Note: May not improve performance")
-                note_row.label(text="on I/O-bound loads")
 
 # Operator to clear the cache
 class LIGGGHTS_OT_clear_cache(bpy.types.Operator):
