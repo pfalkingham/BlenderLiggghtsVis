@@ -133,6 +133,12 @@ class LIGGGHTS_OT_import_particles(bpy.types.Operator, ImportHelper):
         group_out = node_group.nodes.new('NodeGroupOutput')
         points = node_group.nodes.new('GeometryNodeMeshToPoints')
         radius_attr = node_group.nodes.new('GeometryNodeInputNamedAttribute')
+        # New: Input Named Attribute for has_reference
+        extra_ref_attr = node_group.nodes.new('GeometryNodeInputNamedAttribute')
+        # New: Store Named Attribute node
+        store_attr = node_group.nodes.new('GeometryNodeStoreNamedAttribute')
+        # New: Set Material node
+        set_material = node_group.nodes.new('GeometryNodeSetMaterial')
         
         # Setup interface
         node_group.interface.clear()
@@ -145,17 +151,37 @@ class LIGGGHTS_OT_import_particles(bpy.types.Operator, ImportHelper):
         radius_attr.data_type = 'FLOAT'
         radius_attr.inputs["Name"].default_value = "radius"
         
+        # New: Setup for has_reference attribute node
+        extra_ref_attr.data_type = 'FLOAT' # Assuming has_reference is a float (0.0 or 1.0)
+        extra_ref_attr.inputs["Name"].default_value = "position"
+
+        # New: Setup for Store Named Attribute node (user can define attribute name and value later)
+        # For now, let's set a placeholder name, it should be configured by the user as needed.
+        store_attr.inputs["Name"].default_value = ""
+        store_attr.data_type = 'FLOAT_VECTOR' # Or other type as needed
+
         # Link nodes
         links = node_group.links
         links.new(group_in.outputs["Geometry"], points.inputs["Mesh"])
         links.new(radius_attr.outputs[0], points.inputs["Radius"])
-        links.new(points.outputs[0], group_out.inputs["Geometry"])
+        # New: Connect points to store_attr
+        links.new(points.outputs["Points"], store_attr.inputs["Geometry"])
+        # New: Connect store_attr to set_material
+        links.new(store_attr.outputs["Geometry"], set_material.inputs["Geometry"])
+        # New: Connect set_material to group_out
+        links.new(set_material.outputs["Geometry"], group_out.inputs["Geometry"])
         
         # Position nodes
-        group_in.location = (-400, 0)
-        radius_attr.location = (-400, -100)
-        points.location = (0, 0)
-        group_out.location = (200, 0)
+        group_in.location = (-600, 0)
+        radius_attr.location = (-600, -100)
+        # New: Position for has_ref_attr
+        extra_ref_attr.location = (-600, -250) 
+        points.location = (-300, 0)
+        # New: Position for store_attr
+        store_attr.location = (-100, 0)
+        # New: Position for set_material
+        set_material.location = (100, 0)
+        group_out.location = (300, 0)
 
     def _setup_animation_handler(self, context):
         # Remove any existing handlers first
@@ -425,8 +451,13 @@ class LIGGGHTS_OT_import_particles(bpy.types.Operator, ImportHelper):
             bm.verts.ensure_lookup_table()
             
             # Create new layers in the bmesh
-            ref_pos_layer = bm.verts.layers.float_vector.new("reference_position")
-            has_ref_layer = bm.verts.layers.float.new("has_reference")
+            ref_pos_layer = bm.verts.layers.float_vector.get("reference_position")
+            if ref_pos_layer is None:
+                ref_pos_layer = bm.verts.layers.float_vector.new("reference_position")
+            
+            has_ref_layer = bm.verts.layers.float.get("has_reference")
+            if has_ref_layer is None:
+                has_ref_layer = bm.verts.layers.float.new("has_reference")
             
             # Count how many matches we find
             match_count = 0
@@ -535,6 +566,11 @@ class LIGGGHTS_OT_set_reference(bpy.types.Operator):
         
         # Store frame number
         dataset.reference_frame = scene.frame_current
+        
+        # Force an update of the particle data for the current frame
+        LIGGGHTS_OT_import_particles._is_updating = False  # Ensure not locked
+        LIGGGHTS_OT_import_particles._current_frame = -1 # Force update by setting to a different frame
+        LIGGGHTS_OT_import_particles.update_particle_data(scene)
         
         self.report({'INFO'}, f"Reference frame set to {scene.frame_current} with {len(positions)} particles")
         return {'FINISHED'}
