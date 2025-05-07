@@ -34,6 +34,7 @@ The addon expects LIGGGHTS dump files with at least the following columns:
 
 ## Version History
 
+- 0.9.0: Removed a bug duplicating reference data, made sure reference is applied when clicked, and added a much better geometry nodes setup.
 - 0.8.3b: Has a cachine system, and is overall just much faster.
 - 0.8.2: Can read fx/fy/fz and other attributes (untested)
 - 0.7.0: Improved error handling and performance optimizations
@@ -45,7 +46,8 @@ The addon expects LIGGGHTS dump files with at least the following columns:
 	-- file name parsing more robust
 	-- unknown attributes
 - read binary files
-- make sure reference is applied to current frame when you click set reference
+- add a clear referrence button?  Not super necessary (no realy penalty to keeping reference, and can overwrite at any time), but a bit cleaner.
+~~- make sure reference is applied to current frame when you click set reference~~
 ~~- cache files.  maybe dynamically keep track of RAM?  maybe enter size of cache first? dunno.  It's _very_ slow at the moment.~~
   ~~-- a button to flush cache would be useful to do before rendering maybe.~~
 
