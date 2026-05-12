@@ -1,8 +1,8 @@
 bl_info = {
     "name": "LIGGGHTS Particle Visualization",
     "author": "Your Name",
-    "version": (0, 9, 0),  # Updated version with memory optimizations
-    "blender": (4, 3, 0),
+    "version": (0, 9, 1),  # Updated version with memory optimizations
+    "blender": (5, 1, 0),
     "location": "View3D > Sidebar > LIGGGHTS",
     "description": "Import and visualize LIGGGHTS particle simulation data",
     "category": "Import-Export",

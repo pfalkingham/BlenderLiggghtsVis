@@ -144,7 +144,7 @@ class ParticleDataset(bpy.types.PropertyGroup):
         """Check if a list of IDs is sorted in ascending order."""
         if isinstance(ids, np.ndarray) and len(ids) > 1:
             # NumPy version is much faster for large arrays
-            return np.all(ids[:-1] <= ids[1:])
+            return bool(np.all(ids[:-1] <= ids[1:]))
         return all(ids[i] <= ids[i+1] for i in range(len(ids)-1))
 
     def store_reference_data(self, positions, ids):
